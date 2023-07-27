@@ -16,16 +16,14 @@ public class MyBot : IChessBot
         { 0xF1240CCA08E4180E, 0x0107F8C0D5F00908, 0xF2F2EAD2D4E2F1E5, 0xCFFFE5D9D2D4DFCD, 0xEFECF4E5E2E7F2DC, 0xF71802F0EC0616EA, 0x1DFFECF9F8FCDAE3, 0xBF1710F1C8DE020D }, //mgKingTable.
     };
 
+    int mDepth;
+    Move bestMove;
+
     public Move Think(Board board, Timer timer)
     {
-        //Prints the evaluation.
-        Console.WriteLine(StaticEval(board) / 100f);
-
-        //Play a random legal move.
-        Move[] moves = board.GetLegalMoves();
-        Random rng = new();
-        return moves[rng.Next(moves.Length)];
-        
+        mDepth = 4;
+        Search(board, mDepth, -99999999, 99999999, board.IsWhiteToMove ? 1 : -1);
+        return bestMove;
     }
 
 
@@ -36,7 +34,43 @@ public class MyBot : IChessBot
             (sbyte)BitConverter.GetBytes(compressedMGPSTs[(byte)pieceType - 1, 7 - (sbyte)Math.Floor((double)(square / 8))])[square % 8];
     }
 
-    public int StaticEval(Board board)
+    //NegaMax with alpha-beta pruning
+    public int Search(Board board, int depth, int alpha, int beta, int color)
+    {
+        Move[] legalMoves;
+
+        if (board.IsInsufficientMaterial() || board.IsRepeatedPosition() || board.FiftyMoveCounter >= 100)
+            return 0;
+
+        if (depth == 0 || ((legalMoves = board.GetLegalMoves()).Length == 0))
+        {
+            if (board.IsInCheckmate())
+                return -9999999;
+
+            return color * Evaluate(board);
+        }
+
+        int bestEvaluation = int.MinValue;
+        foreach (Move move in legalMoves)
+        {
+            board.MakeMove(move);
+            int evaluation = -Search(board, depth - 1, -beta, -alpha, -color);
+            board.UndoMove(move);
+
+            if (bestEvaluation < evaluation)
+            {
+                bestEvaluation = evaluation;
+                if (depth == mDepth)
+                    bestMove = move;
+            }
+            alpha = Math.Max(alpha, bestEvaluation);
+            if (alpha >= beta) break;
+        }
+
+        return bestEvaluation;
+    }
+
+    public int Evaluate(Board board)
     {
         int materialCount = 0;
         int positionalBalance = 0; 
@@ -64,7 +98,7 @@ public class MyBot : IChessBot
             if (i == 3)
             {
                 positionalBalance += 50 * Math.Sign(Convert.ToInt16(whitePieceList.Count == 2));
-                positionalBalance += 50 * Math.Sign(Convert.ToInt16(blackPieceList.Count == 2));
+                positionalBalance -= 50 * Math.Sign(Convert.ToInt16(blackPieceList.Count == 2));
             }
 
         }
