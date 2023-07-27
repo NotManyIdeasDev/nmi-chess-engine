@@ -1,0 +1,7 @@
+[White "Human"]
+[Black "MyBot"]
+[Result "BlackIllegalMove"]
+1. e4 Na6 2. Nf3 Rb8 3. Bxa6 Ra8 4. Bxb7 Rb8 5. Bxc8 Rxb2 6. Ne5 Rxb1 7. Rxb1 Qxc8 8. Rb8 Kd8 9. Rxc8+ Kxc8 10. Nxf7 Kb7 11. Nxh8 Ka6 12. Qe2+ Ka5 13. c4 Ka4 14. d3 Kb4 15. Qb2+ Kc5 16. Qb5+ 
+
+ILLEGAL MOVE:
+Illegal move: b4c5 in position: 5bnN/p1ppp1pp/8/1Qk5/2P1P3/3P4/P4PPP/2B1K2R b K - 4 16
