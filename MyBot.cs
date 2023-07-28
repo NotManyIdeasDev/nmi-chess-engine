@@ -91,6 +91,6 @@ public class MyBot : IChessBot
         int firstIndex = white ? (sbyte)(square / 8) : (7 - (sbyte)(square / 8));
         int secondIndex = white ? (7 - (square % 8)) : square % 8;
         //Get the corresponding positional value for each square of each pieceType, flip if black.
-        return BitConverter.GetBytes(compressedMGPSTs[(byte)pieceType - 1, firstIndex])[secondIndex];
+        return (sbyte)BitConverter.GetBytes(compressedMGPSTs[(byte)pieceType - 1, firstIndex])[secondIndex];
     }
 }
