@@ -1,5 +1,6 @@
 using ChessChallenge.API;
 using System;
+using System.Collections.Generic;
 
 public class MyBot : IChessBot
 {
@@ -14,6 +15,9 @@ public class MyBot : IChessBot
         { 0xFFEEF70AF1E7E1CE, 0xDDF80B02080FFD01, 0xF202F5FEFB020E05, 0xF7E6F7F6FEFC03FD, 0xE5E5F0F0FF11FE01, 0xF3EF07081D382F39, 0xE8D9FB01F0391C36, 0xE4001D0C3B2C2B2D }, //mgQueenTable.
         { 0xF1240CCA08E4180E, 0x0107F8C0D5F00908, 0xF2F2EAD2D4E2F1E5, 0xCFFFE5D9D2D4DFCD, 0xEFECF4E5E2E7F2DC, 0xF71802F0EC0616EA, 0x1DFFECF9F8FCDAE3, 0xBF1710F1C8DE020D }, //mgKingTable.
     };
+
+    // victim: K, Q, R, B, N, P, None; attacker: None, K, Q, R, B, N, P
+    static ulong[] compressedMVVLVA = { 0x00000000000000, 0x0A0B0C0D0E0F00, 0x14151617181900, 0x1E1F2021222300, 0x28292A2B2C2D00, 0x32333435363700, 0x00000000000000 };
 
     int botDepth = 4;
     Move bestMove;
@@ -51,19 +55,34 @@ public class MyBot : IChessBot
         return evaluation;
     }
 
+    //Move Ordering
+    public void OrderMoves(ref Move[] moves)
+    {
+        List<Tuple<Move, int>> orderedMoves = new();
+        foreach (Move move in moves) { orderedMoves.Add(new Tuple<Move, int>(move, GetMVVLVAValue(move.CapturePieceType, move.MovePieceType))); }       
+
+        orderedMoves.Sort((a, b) =>  b.Item2.CompareTo(a.Item2));
+        for (int i = 0; i < moves.Length; i++) moves[i] = orderedMoves[i].Item1;
+
+        orderedMoves.Reverse();
+    }
+
     public int SearchABNegaMax(Board board, int depth, int alpha, int beta, int color)
     {
         Move[] legalMoves;
+
         if (board.IsInsufficientMaterial() || board.IsRepeatedPosition() || board.FiftyMoveCounter >= 100)
             return 0;
 
         if (depth == 0 || (legalMoves = board.GetLegalMoves()).Length == 0)
         {
             if (board.IsInCheckmate())
-                return -bigNumber;
+                return -9999999;
 
             return color * EvaluatePosition(board);
         }
+
+        OrderMoves(ref legalMoves);
 
         int bestEvaluation = -bigNumber;
         foreach (Move move in legalMoves)
@@ -89,8 +108,13 @@ public class MyBot : IChessBot
     {
         //Flip PSTs for opposite colors.
         int firstIndex = white ? (sbyte)(square / 8) : (7 - (sbyte)(square / 8));
-        int secondIndex = white ? (7 - (square % 8)) : square % 8;
         //Get the corresponding positional value for each square of each pieceType, flip if black.
-        return (sbyte)BitConverter.GetBytes(compressedMGPSTs[(byte)pieceType - 1, firstIndex])[secondIndex];
+        return (sbyte)BitConverter.GetBytes(compressedMGPSTs[(byte)pieceType - 1, firstIndex])[7 - (square % 8)];
+    }
+
+    //Get corresponding encoded MVV-LVA Values
+    public int GetMVVLVAValue(PieceType victim, PieceType attacker)
+    {
+        return BitConverter.GetBytes(compressedMVVLVA[(int)victim])[(int)attacker];
     }
 }
