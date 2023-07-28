@@ -1,7 +1,6 @@
 using ChessChallenge.API;
 using System;
-using System.ComponentModel;
-using System.Data;
+
 public class MyBot : IChessBot
 {
     // Compressed PSTs & piece values taken from "https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function".
