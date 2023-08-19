@@ -13,17 +13,17 @@ using System;
     beta = Best already explored option along path to the root for minimizer.
  */
 
-public enum TTFlags : byte { INVALID, PV_NODE, CUT_NODE, ALL_NODE };
-public struct Transposition {
-    public ulong zobristKey;
-    public Move move;
-    public int evaluation;
-    public byte depth;
-    public TTFlags flag;
-}
-
 public class MyBot : IChessBot
 {
+    enum TTFlags : byte { INVALID, ALL_NODE, CUT_NODE, PV_NODE };
+    record struct Transposition(ulong ZobristKey, Move Move, int Evaluation, int Depth, TTFlags Flag);
+
+    Board board;
+    Timer timer;
+    Move bestMoveRoot;
+
+    Transposition[] TTable = new Transposition[0x700000];
+    int[] mgPieceValues = { 82, 337, 365, 477, 1025, 32000 };
     ulong[,] compressedMGPSTs = {
         { 0x0000000000000000, 0xDDFFECE9F11826EA, 0xE6FCFCF6030321F4, 0xE5FEFB0C11060AE7, 0xF20D0615170C11E9, 0xFA071A1F413819EC, 0x627F3D5F447E22F5, 0x0000000000000000 },
         { 0x97EBC6DFEFE4EDE9, 0xE3CBF4FDFF12F2ED, 0xE9F70C0A131119F0, 0xF304100D1C1315F8, 0xF711133525451216, 0xD13C25415481492C, 0xB7D74824173E07EF, 0x81A7DECF3D9FF195 },
@@ -33,22 +33,26 @@ public class MyBot : IChessBot
         { 0xF1240CCA08E4180E, 0x0107F8C0D5F00908, 0xF2F2EAD2D4E2F1E5, 0xCFFFE5D9D2D4DFCD, 0xEFECF4E5E2E7F2DC, 0xF71802F0EC0616EA, 0x1DFFECF9F8FCDAE3, 0xBF1710F1C8DE020D },
     };
   
-    int infinity = 99999999;
-    int[] mgPieceValues = { 82, 337, 365, 477, 1025, 32000 };
-    byte botDepth = 6;
-
-    const ulong TTSize = 0x6FFFFF;
-    Transposition[] TTable = new Transposition[TTSize + 1];
-
-    Move moveToPlay;
-
-    public Move Think(Board board, Timer timer)
+    public Move Think(Board boardInput, Timer timerInput)
     {
-        Search(board, botDepth, -infinity, infinity, board.IsWhiteToMove ? 1 : -1);
-        return moveToPlay;
+        board = boardInput;
+        timer = timerInput;
+
+        bestMoveRoot = Move.NullMove;
+        for (int depth = 0; depth <= 50; depth++)
+        {
+            Search(depth, -30000, 30000, board.IsWhiteToMove ? 1 : -1, 0);
+            if (Timeout())
+            {
+                Console.WriteLine($"Depth Reached: {depth}");
+                break;
+            }
+        }
+        
+        return bestMoveRoot.IsNull ? board.GetLegalMoves()[0] : bestMoveRoot;
     }
 
-    void CheckMaterialAndPosition(Board board, ref int evaluation, bool white)
+    int CheckMaterialAndPosition(bool white)
     {
         int sum = 0;
 
@@ -59,107 +63,86 @@ public class MyBot : IChessBot
                 sum += mgPieceValues[i - 1] + GetPSTValue(compressedMGPSTs, (PieceType)i, piece.Square.Index, white);
         }
 
-        evaluation += sum * (white ? 1 : -1);
+        return sum;
     }
 
-    int Evaluate(Board board)
+    bool Timeout() => timer.MillisecondsElapsedThisTurn >= timer.MillisecondsRemaining / 40 + timer.IncrementMilliseconds / 2;
+    int Evaluate() => CheckMaterialAndPosition(true) - CheckMaterialAndPosition(false);
+
+    int Search(int depth, int alpha, int beta, int color, int ply)
     {
-        int evaluation = 0;
-        CheckMaterialAndPosition(board, ref evaluation, true);
-        CheckMaterialAndPosition(board, ref evaluation, false);
-        return evaluation;
-    }
+        ulong zKey = board.ZobristKey;
+        bool qSearch = depth <= 0;
+        bool notRoot = ply > 0;     
+        int bestEvaluation = -30000;
 
-    int Search(Board board, int depth, int alpha, int beta, int color)
-    {
-        //TT Check Code
-        int originalAlpha = alpha;
-
-        ref Transposition transposition = ref TTable[board.ZobristKey & TTSize];
-        if (transposition.flag != TTFlags.INVALID && transposition.zobristKey == board.ZobristKey && transposition.depth >= depth)
-        {
-            switch (transposition.flag)
-            {
-                case TTFlags.PV_NODE:
-                    return transposition.evaluation;
-                case TTFlags.CUT_NODE:
-                    alpha = Math.Max(alpha, transposition.evaluation);
-                    break;
-                case TTFlags.ALL_NODE:
-                    beta = Math.Min(beta, transposition.evaluation);
-                    break;
-            }
-
-            if (alpha >= beta)
-                return transposition.evaluation;
-        }
-
-        if (board.IsDraw())
+        if (notRoot && board.IsRepeatedPosition())
             return 0;
 
-        Move[] moves = board.GetLegalMoves();
-        if (depth == 0 || moves.Length == 0)
-            return board.IsInCheckmate() ? (board.PlyCount * 100) - 9999999 : (color * Evaluate(board));
+        Transposition tp = TTable[zKey & 0x6FFFFF];
+        if (notRoot && tp.ZobristKey == zKey && tp.Depth >= depth &&
+            (tp.Flag == TTFlags.PV_NODE ||
+            (tp.Flag == TTFlags.CUT_NODE && tp.Evaluation >= beta) ||
+            (tp.Flag == TTFlags.ALL_NODE && tp.Evaluation <= alpha)
+        )) return tp.Evaluation;
 
-        OrderMoves(board.ZobristKey, ref moves);
+        int eval = color * Evaluate();
+        if (qSearch)
+        {
+            bestEvaluation = eval;
+            if (bestEvaluation >= beta) return bestEvaluation;
+            alpha = Math.Max(alpha, bestEvaluation);
+        }
 
-        int maxEvaluation = -infinity;
+        Move[] moves = board.GetLegalMoves(qSearch);
+        OrderMoves(tp, ref moves);
+
+        int originalAlpha = alpha;
+        Move bestMove = Move.NullMove;     
+        
         foreach (Move move in moves)
         {
+            if (Timeout()) return 30000;
+
             board.MakeMove(move);
-            int evaluation = -Search(board, depth - 1, -beta, -alpha, -color);
+            int evaluation = -Search(depth - 1, -beta, -alpha, -color, ply + 1);
             board.UndoMove(move);
 
-            if (evaluation > maxEvaluation)
+            if (evaluation > bestEvaluation)
             {
-                maxEvaluation = evaluation;
-                if (depth == botDepth)
-                    moveToPlay = move;
+                bestEvaluation = evaluation;
+                bestMove = move;
+                if (ply == 0) bestMoveRoot = move;
+                alpha = Math.Max(alpha, evaluation);
+                if (alpha >= beta) break;
             }
 
-            alpha = Math.Max(alpha, evaluation);
-            if (alpha >= beta) break;
+ 
         }
-     
-        transposition.evaluation = maxEvaluation;
-        transposition.move = moveToPlay;
-        transposition.depth = (byte)depth;
 
-        if (maxEvaluation <= originalAlpha)
-            transposition.flag = TTFlags.CUT_NODE;
-        else if (maxEvaluation >= beta)
-            transposition.flag = TTFlags.ALL_NODE;
-        else
-            transposition.flag = TTFlags.PV_NODE;
-
-        return maxEvaluation;
+        if (!qSearch && moves.Length == 0) return board.IsInCheck() ? -30000 + ply : 0;
+        TTable[zKey & 0x6FFFFF] = new Transposition(zKey, bestMove, bestEvaluation, depth, bestEvaluation >= beta ? TTFlags.CUT_NODE : bestEvaluation > originalAlpha ? TTFlags.ALL_NODE : TTFlags.PV_NODE);
+        
+        return bestEvaluation;
     }
 
-    void OrderMoves(ulong zobristKey, ref Move[] moves)
+    void OrderMoves(Transposition tp, ref Move[] moves)
     {
         int[] moveScores = new int[moves.Length];
-        for (byte m = 0; ++m < moves.Length;) moveScores[m] = GetMoveScore(zobristKey, moves[m]);
+        for (byte m = 0; ++m < moves.Length;) moveScores[m] = GetMoveScore(tp, moves[m]);
         Array.Sort(moveScores, moves);
         Array.Reverse(moves);
     }
 
-    int GetMoveScore(ulong zobristKey, Move move)
+    int GetMoveScore(Transposition tp, Move move)
     {
-        Transposition transposition = TTable[zobristKey & TTSize];
-
-        if (transposition.move == move && transposition.zobristKey == zobristKey)
-            return infinity;
-        if (move.IsPromotion)
-            return infinity - 100;
+        if (tp.Move == move && tp.ZobristKey == board.ZobristKey)
+            return 999999;
         if (move.IsCapture)
-            return 1000 - 10 * (int)move.CapturePieceType - (int)move.MovePieceType;
+            return 100 * (int)move.CapturePieceType - (int)move.MovePieceType;
 
         return 0;
     }
 
-    int GetPSTValue(ulong[,] compressedPSTs, PieceType pieceType, int square, bool white)
-    {
-        int firstIndex = white ? (sbyte)(square / 8) : (7 - (sbyte)(square / 8));
-        return (sbyte)BitConverter.GetBytes(compressedPSTs[(byte)pieceType - 1, firstIndex])[7 - (square % 8)];
-    }
+    int GetPSTValue(ulong[,] compressedPSTs, PieceType pieceType, int square, bool white) => (sbyte)BitConverter.GetBytes(compressedPSTs[(byte)pieceType - 1, white ? (sbyte)(square / 8) : (7 - (sbyte)(square / 8))])[7 - (square % 8)];
 }
