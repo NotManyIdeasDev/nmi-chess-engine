@@ -3,11 +3,12 @@ using System;
 using System.Linq;
 
 /*
-    Chess Engine made by NotManyIdeas, for the SebLague TinyChessBot Challenge. See it in action at https://chess.stjo.dev/
-    NotManyIdeas, 2023 (c)
+    Chess Engine made by NotManyIdeas and Ciridev, for the SebLague TinyChessBot Challenge. See it in action at https://chess.stjo.dev/
+    NotManyIdeas & Ciridev, 2023 (c)
  
     INFO:
     Tables follow this order: P, N, B, R, Q, K
+    TTFlags follow this order: 0 = invalid, 1 = exact, 2 = upperbound, 3 = lowerbound
 
     ** Search Function **
     alpha = Best already explored option along path to the root for maximizer.
@@ -15,98 +16,76 @@ using System.Linq;
  */
 
 public class MyBot : IChessBot
-{
-    enum TTFlags : byte { INVALID, ALL_NODE, CUT_NODE, PV_NODE };
-    record struct Transposition(ulong ZobristKey, Move Move, int Evaluation, int Depth, TTFlags Flag);
+{ 
+    record struct Transposition(ulong ZobristKey, Move Move, int Evaluation, int Depth, int Flag);
 
     Board board;
     Timer timer;
     Move bestMoveRoot;
+    int debugEval = 0;
 
-    Transposition[] TTable = new Transposition[0x700000];
-    readonly int[] phase_weight = { 0, 1, 1, 2, 4, 0 };
-    private readonly short[] pvm = { 82, 337, 365, 477, 1025, 20000, 94, 281, 297, 512, 936, 20000 };
-    private readonly decimal[] PackedPestoTables = {
-        63746705523041458768562654720m, 71818693703096985528394040064m, 75532537544690978830456252672m, 75536154932036771593352371712m, 76774085526445040292133284352m, 3110608541636285947269332480m, 936945638387574698250991104m, 75531285965747665584902616832m,
-        77047302762000299964198997571m, 3730792265775293618620982364m, 3121489077029470166123295018m, 3747712412930601838683035969m, 3763381335243474116535455791m, 8067176012614548496052660822m, 4977175895537975520060507415m, 2475894077091727551177487608m,
-        2458978764687427073924784380m, 3718684080556872886692423941m, 4959037324412353051075877138m, 3135972447545098299460234261m, 4371494653131335197311645996m, 9624249097030609585804826662m, 9301461106541282841985626641m, 2793818196182115168911564530m,
-        77683174186957799541255830262m, 4660418590176711545920359433m, 4971145620211324499469864196m, 5608211711321183125202150414m, 5617883191736004891949734160m, 7150801075091790966455611144m, 5619082524459738931006868492m, 649197923531967450704711664m,
-        75809334407291469990832437230m, 78322691297526401047122740223m, 4348529951871323093202439165m, 4990460191572192980035045640m, 5597312470813537077508379404m, 4980755617409140165251173636m, 1890741055734852330174483975m, 76772801025035254361275759599m,
-        75502243563200070682362835182m, 78896921543467230670583692029m, 2489164206166677455700101373m, 4338830174078735659125311481m, 4960199192571758553533648130m, 3420013420025511569771334658m, 1557077491473974933188251927m, 77376040767919248347203368440m,
-        73949978050619586491881614568m, 77043619187199676893167803647m, 1212557245150259869494540530m, 3081561358716686153294085872m, 3392217589357453836837847030m, 1219782446916489227407330320m, 78580145051212187267589731866m, 75798434925965430405537592305m,
-        68369566912511282590874449920m, 72396532057599326246617936384m, 75186737388538008131054524416m, 77027917484951889231108827392m, 73655004947793353634062267392m, 76417372019396591550492896512m, 74568981255592060493492515584m, 70529879645288096380279255040m,
+    Transposition[] TTable = new Transposition[0x400000];
+    int[] mgPieceValues = { 82, 337, 365, 477, 1025, 32000 };
+    ulong[,] compressedMGPSTs = {
+        { 0x0000000000000000, 0xDDFFECE9F11826EA, 0xE6FCFCF6030321F4, 0xE5FEFB0C11060AE7, 0xF20D0615170C11E9, 0xFA071A1F413819EC, 0x627F3D5F447E22F5, 0x0000000000000000 },
+        { 0x97EBC6DFEFE4EDE9, 0xE3CBF4FDFF12F2ED, 0xE9F70C0A131119F0, 0xF304100D1C1315F8, 0xF711133525451216, 0xD13C25415481492C, 0xB7D74824173E07EF, 0x81A7DECF3D9FF195 },
+        { 0xDFFDF2EBF3F4D9EB, 0x040F100007152101, 0x000F0F0F0E1B120A, 0xFA0D0D1A220C0A04, 0xFC051332252507FE, 0xF0252B28233225FE, 0xE610EEF31E3B12D1, 0xE304AEDBE7D607F8 },
+        { 0xEDF301111007DBE6, 0xD4F0ECF7FF0BFAB9, 0xD3E7F0EF0300FBDF, 0xDCE6F4FF09F906E9, 0xE8F5071A1823F8EC, 0xFB131A24112D3D10, 0x1B203A3E50431A2C, 0x202A20333F091F2B },
+        { 0xFFEEF70AF1E7E1CE, 0xDDF80B02080FFD01, 0xF202F5FEFB020E05, 0xF7E6F7F6FEFC03FD, 0xE5E5F0F0FF11FE01, 0xF3EF07081D382F39, 0xE8D9FB01F0391C36, 0xE4001D0C3B2C2B2D },
+        { 0xF1240CCA08E4180E, 0x0107F8C0D5F00908, 0xF2F2EAD2D4E2F1E5, 0xCFFFE5D9D2D4DFCD, 0xEFECF4E5E2E7F2DC, 0xF71802F0EC0616EA, 0x1DFFECF9F8FCDAE3, 0xBF1710F1C8DE020D },
     };
-
-    private readonly int[][] UnpackedPestoTables = new int[64][];
+  
     public Move Think(Board boardInput, Timer timerInput)
     {
         board = boardInput;
         timer = timerInput;
 
         bestMoveRoot = Move.NullMove;
-        for (int depth = 0; depth <= 50; depth++)
+        for (int depth = 1; depth <= 50; depth++)
         {
-            Search(depth, -30000, 30000, 0);
-            if (Timeout()) {
-                Console.WriteLine($"Depth: {depth}");
-                break;
-            };
+            Search(depth, -30000, 30000, board.IsWhiteToMove ? 1 : -1, 0);
+            if (Timeout()) break;
         }
 
+        Console.WriteLine(debugEval / 100f);
         return bestMoveRoot.IsNull ? board.GetLegalMoves()[0] : bestMoveRoot;
     }
 
-    int Evaluate()
+    int CheckMaterialAndPosition(bool white)
     {
-        int middlegame = 0, endgame = 0, gamephase = 0, sideToMove = 2;
-        for (; --sideToMove >= 0;)
-        {
-            for (int piece = -1, square; ++piece < 6;)
-                for (ulong mask = board.GetPieceBitboard((PieceType)piece + 1, sideToMove > 0); mask != 0;)
-                {
-                    // Gamephase, middlegame -> endgame
-                    gamephase += phase_weight[piece];
+        int sum = 0;
 
-                    // Material and square evaluation
-                    square = BitboardHelper.ClearAndGetIndexOfLSB(ref mask) ^ 56 * sideToMove;
-                    middlegame += UnpackedPestoTables[square][piece];
-                    endgame += UnpackedPestoTables[square][piece + 6];
-                }
-            middlegame = -middlegame;
-            endgame = -endgame;
+        for (int i = 0; ++i < 7;)
+        {
+            foreach (Piece piece in board.GetPieceList((PieceType)i, white))
+                sum += mgPieceValues[i - 1] + GetPSTValue(compressedMGPSTs, (PieceType)i, piece.Square.Index, white);
         }
-        return (middlegame * gamephase + endgame * (24 - gamephase)) / 24 * (board.IsWhiteToMove ? 1 : -1);
+
+        return sum;
     }
 
-    bool Timeout() {
-        int timeLeft = timer.MillisecondsRemaining;
-        int timeForThisMove = timeLeft / 30 + timer.IncrementMilliseconds / 2;
-        if (timeForThisMove >= timeLeft)
-            timeForThisMove = timeLeft - 500;
-        if (timeForThisMove < 0)
-            timeForThisMove = 100;
+    bool Timeout() => timer.MillisecondsElapsedThisTurn >= timer.MillisecondsRemaining / 30;
+    int Evaluate() => CheckMaterialAndPosition(true) - CheckMaterialAndPosition(false);
 
-        return timer.MillisecondsElapsedThisTurn > timeForThisMove;
-    } 
-
-    int Search(int depth, int alpha, int beta, int ply)
+    int Search(int depth, int alpha, int beta, int color, int ply)
     {
         ulong zKey = board.ZobristKey;
+        bool inCheck = board.IsInCheck();
         bool qSearch = depth <= 0;
         bool notRoot = ply > 0;     
-        int bestEvaluation = -30000;
+        int bestEvaluation = -999999;
 
         if (notRoot && board.IsRepeatedPosition())
             return 0;
 
-        Transposition tp = TTable[zKey & 0x6FFFFF];
+        Transposition tp = TTable[zKey & 0x3FFFFF];
         if (notRoot && tp.ZobristKey == zKey && tp.Depth >= depth &&
-            (tp.Flag == TTFlags.PV_NODE ||
-            (tp.Flag == TTFlags.CUT_NODE && tp.Evaluation >= beta) ||
-            (tp.Flag == TTFlags.ALL_NODE && tp.Evaluation <= alpha)
-        )) return tp.Evaluation;
+            (tp.Flag == 1 ||
+            (tp.Flag == 2 && tp.Evaluation <= alpha) ||
+            (tp.Flag == 3 && tp.Evaluation >= beta))
+        ) return tp.Evaluation;
 
-        int eval = Evaluate();
+        int eval = color * Evaluate();
         if (qSearch)
         {
             bestEvaluation = eval;
@@ -114,63 +93,40 @@ public class MyBot : IChessBot
             alpha = Math.Max(alpha, bestEvaluation);
         }
 
-        Move[] moves = board.GetLegalMoves(qSearch);
-        OrderMoves(tp, ref moves);
+        Move[] moves = board.GetLegalMoves(qSearch && !inCheck).OrderByDescending(move =>
+            tp.Move == move && tp.ZobristKey == board.ZobristKey ? 999999 : move.IsCapture ? 100 * (int)move.CapturePieceType - (int)move.MovePieceType : 0
+        ).ToArray();
 
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;     
-        
+
         foreach (Move move in moves)
         {
-            if (Timeout()) return 30000;
+            if (Timeout()) return 999999;
 
             board.MakeMove(move);
-            int evaluation = -Search(depth - 1, -beta, -alpha, ply + 1);
+            int evaluation = -Search(depth - 1, -beta, -alpha, -color, ply + 1);
             board.UndoMove(move);
-
+             
             if (evaluation > bestEvaluation)
             {
                 bestEvaluation = evaluation;
                 bestMove = move;
-                if (ply == 0) bestMoveRoot = move;
+                if (ply == 0)
+                {
+                    bestMoveRoot = move;
+                    debugEval = bestEvaluation;
+                }
                 alpha = Math.Max(alpha, evaluation);
                 if (alpha >= beta) break;
             }
         }
 
-        if (!qSearch && moves.Length == 0) return board.IsInCheck() ? -50000 + ply : 0;
-        TTable[zKey & 0x6FFFFF] = new Transposition(zKey, bestMove, bestEvaluation, depth, bestEvaluation >= beta ? TTFlags.CUT_NODE : bestEvaluation > originalAlpha ? TTFlags.ALL_NODE : TTFlags.PV_NODE);
+        if (!qSearch && moves.Length == 0) return inCheck ? -50000 + ply : 0;
+        TTable[zKey & 0x3FFFFF] = new Transposition(zKey, bestMove, bestEvaluation, depth, bestEvaluation >= beta ? 2 : bestEvaluation >= originalAlpha ? 1 : 3);
         
         return bestEvaluation;
     }
 
-    void OrderMoves(Transposition tp, ref Move[] moves)
-    {
-        int[] moveScores = new int[moves.Length];
-        for (byte m = 0; ++m < moves.Length;) moveScores[m] = GetMoveScore(tp, moves[m]);
-        Array.Sort(moveScores, moves);
-        Array.Reverse(moves);
-    }
-
-    int GetMoveScore(Transposition tp, Move move)
-    {
-        if (tp.Move == move && tp.ZobristKey == board.ZobristKey)
-            return 999999;
-        if (move.IsCapture)
-            return 100 * (int)move.CapturePieceType - (int)move.MovePieceType;
-
-        return 0;
-    }
-
-    public MyBot()
-    {
-        UnpackedPestoTables = PackedPestoTables.Select(packedTable =>
-        {
-            int pieceType = 0;
-            return decimal.GetBits(packedTable).Take(3)
-                .SelectMany(c => BitConverter.GetBytes(c)
-                    .Select(square => (int)((sbyte)square * 1.461) + pvm[pieceType++]))
-                .ToArray();
-        }).ToArray();
-    }
+    int GetPSTValue(ulong[,] compressedPSTs, PieceType pieceType, int square, bool white) => (sbyte)BitConverter.GetBytes(compressedPSTs[(byte)pieceType - 1, white ? (sbyte)(square / 8) : (7 - (sbyte)(square / 8))])[7 - (square % 8)];
 }
