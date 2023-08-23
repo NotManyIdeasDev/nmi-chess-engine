@@ -2,27 +2,13 @@ using ChessChallenge.API;
 using System;
 using System.Linq;
 
-/*
-    Chess Engine made by NotManyIdeas and Ciridev, for the SebLague TinyChessBot Challenge. See it in action at https://chess.stjo.dev/
-    NotManyIdeas & Ciridev, 2023 (c)
- 
-    INFO:
-    Tables follow this order: P, N, B, R, Q, K
-    TTFlags follow this order: 0 = invalid, 1 = exact, 2 = upperbound, 3 = lowerbound
-
-    ** Search Function **
-    alpha = Best already explored option along path to the root for maximizer.
-    beta = Best already explored option along path to the root for minimizer.
- */
-
 public class MyBot : IChessBot
-{ 
+{
     record struct Transposition(ulong ZobristKey, Move Move, int Evaluation, int Depth, int Flag);
 
     Board board;
     Timer timer;
     Move bestMoveRoot;
-    int debugEval = 0;
 
     Transposition[] TTable = new Transposition[0x400000];
     int[,,] historyHeuristics = new int[2, 7, 64];
@@ -49,16 +35,12 @@ public class MyBot : IChessBot
         timer = timerInput;
 
         bestMoveRoot = Move.NullMove;
-        for (int depth = 1; depth <= 50; depth++)
+        for (int depth = 1; depth <= 16; depth++)
         {
             Search(depth, -30000, 30000, 0);
-            if (Timeout()) {
-                Console.WriteLine($"Depth reached: {depth}");
-                break;
-            } 
+            if (Timeout()) break;
         }
 
-        Console.WriteLine(debugEval / 100f);
         return bestMoveRoot.IsNull ? board.GetLegalMoves()[0] : bestMoveRoot;
     }
 
@@ -85,7 +67,7 @@ public class MyBot : IChessBot
         return (middlegame * gamePhase + endgame * (24 - gamePhase)) / 24 * (board.IsWhiteToMove ? 1 : -1);
     }
 
-    bool Timeout() => timer.MillisecondsElapsedThisTurn >= timer.MillisecondsRemaining / 30;
+    bool Timeout() => timer.MillisecondsElapsedThisTurn >= timer.MillisecondsRemaining / 35 + timer.IncrementMilliseconds / 4;
 
     int Search(int depth, int alpha, int beta, int ply)
     {
@@ -93,7 +75,7 @@ public class MyBot : IChessBot
         bool inCheck = board.IsInCheck();
         bool qSearch = depth <= 0;
         int turn = board.IsWhiteToMove ? 1 : 0;
-        bool notRoot = ply > 0;     
+        bool notRoot = ply > 0;
         int bestEvaluation = -999999;
 
         if (notRoot && board.IsRepeatedPosition())
@@ -115,12 +97,12 @@ public class MyBot : IChessBot
         }
 
         Move[] moves = board.GetLegalMoves(qSearch && !inCheck).OrderByDescending(move =>
-            tp.Move == move && tp.ZobristKey == board.ZobristKey ? 999999 : 
+            tp.Move == move && tp.ZobristKey == board.ZobristKey ? 999999 :
             move.IsCapture ? 100 * (int)move.CapturePieceType - (int)move.MovePieceType : historyHeuristics[turn, (int)move.MovePieceType, move.TargetSquare.Index]
         ).ToArray();
 
         int originalAlpha = alpha;
-        Move bestMove = Move.NullMove;     
+        Move bestMove = Move.NullMove;
 
         foreach (Move move in moves)
         {
@@ -129,18 +111,15 @@ public class MyBot : IChessBot
             board.MakeMove(move);
             int evaluation = -Search(depth - 1, -beta, -alpha, ply + 1);
             board.UndoMove(move);
-             
+
             if (evaluation > bestEvaluation)
             {
                 bestEvaluation = evaluation;
                 bestMove = move;
-                if (ply == 0)
-                {
-                    bestMoveRoot = move;
-                    debugEval = bestEvaluation;
-                }
+                if (ply == 0) bestMoveRoot = move;
                 alpha = Math.Max(alpha, evaluation);
-                if (alpha >= beta) {
+                if (alpha >= beta)
+                {
                     if (!move.IsCapture && !qSearch)
                         historyHeuristics[turn, (int)move.MovePieceType, move.TargetSquare.Index] += depth * depth;
                     break;
@@ -150,7 +129,7 @@ public class MyBot : IChessBot
 
         if (!qSearch && moves.Length == 0) return inCheck ? ply - 50000 : 0;
         TTable[zKey & 0x3FFFFF] = new Transposition(zKey, bestMove, bestEvaluation, depth, bestEvaluation >= beta ? 2 : bestEvaluation >= originalAlpha ? 1 : 3);
-        
+
         return bestEvaluation;
     }
 
