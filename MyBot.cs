@@ -10,8 +10,9 @@ public class MyBot : IChessBot
     Timer timer;
     Move bestMoveRoot;
 
-    Transposition[] TTable = new Transposition[0x400000];
+    Transposition[] TTable = new Transposition[0x600000];
     int[,,] historyHeuristics = new int[2, 7, 64];
+    Move[] killers = new Move[2048];
     int[] phaseWeight = { 0, 1, 1, 2, 4, 0 };
     int[] pieceValues = { 82, 337, 365, 477, 1025, 32000, 94, 281, 297, 512, 936, 32000 };
     ulong[,] compressedPSTs = {
@@ -35,10 +36,11 @@ public class MyBot : IChessBot
         timer = timerInput;
 
         bestMoveRoot = Move.NullMove;
-        for (int depth = 1; depth <= 16; depth++)
+        for (int depth = 1, alpha = -999999, beta = 999999; ;)
         {
-            Search(depth, -30000, 30000, 0);
+            Search(depth, alpha, beta, 0);
             if (Timeout()) break;
+            depth++;
         }
 
         return bestMoveRoot.IsNull ? board.GetLegalMoves()[0] : bestMoveRoot;
@@ -66,8 +68,7 @@ public class MyBot : IChessBot
 
         return (middlegame * gamePhase + endgame * (24 - gamePhase)) / 24 * (board.IsWhiteToMove ? 1 : -1);
     }
-
-    bool Timeout() => timer.MillisecondsElapsedThisTurn >= timer.MillisecondsRemaining / 35 + timer.IncrementMilliseconds / 4;
+    bool Timeout() => timer.MillisecondsElapsedThisTurn >= timer.MillisecondsRemaining / 30 + timer.IncrementMilliseconds / 2.5;
 
     int Search(int depth, int alpha, int beta, int ply)
     {
@@ -81,7 +82,7 @@ public class MyBot : IChessBot
         if (notRoot && board.IsRepeatedPosition())
             return 0;
 
-        Transposition tp = TTable[zKey & 0x3FFFFF];
+        Transposition tp = TTable[zKey & 0x5FFFFF];
         if (notRoot && tp.ZobristKey == zKey && tp.Depth >= depth &&
             (tp.Flag == 1 ||
             (tp.Flag == 2 && tp.Evaluation <= alpha) ||
@@ -97,9 +98,12 @@ public class MyBot : IChessBot
         }
 
         Move[] moves = board.GetLegalMoves(qSearch && !inCheck).OrderByDescending(move =>
-            tp.Move == move && tp.ZobristKey == board.ZobristKey ? 999999 :
-            move.IsCapture ? 100 * (int)move.CapturePieceType - (int)move.MovePieceType : historyHeuristics[turn, (int)move.MovePieceType, move.TargetSquare.Index]
+            tp.Move == move && tp.ZobristKey == board.ZobristKey ? 9000000 :
+            move.IsCapture ? 1000000 * (int)move.CapturePieceType - (int)move.MovePieceType : 
+            killers[ply] == move ? 900000 : historyHeuristics[turn, (int)move.MovePieceType, move.TargetSquare.Index]
         ).ToArray();
+
+        if (!qSearch && moves.Length == 0) return inCheck ? ply - 99999 : 0;
 
         int originalAlpha = alpha;
         Move bestMove = Move.NullMove;
@@ -121,14 +125,17 @@ public class MyBot : IChessBot
                 if (alpha >= beta)
                 {
                     if (!move.IsCapture && !qSearch)
+                    {
                         historyHeuristics[turn, (int)move.MovePieceType, move.TargetSquare.Index] += depth * depth;
+                        killers[ply] = move;
+                    }
+                    
                     break;
                 };
             }
         }
 
-        if (!qSearch && moves.Length == 0) return inCheck ? ply - 50000 : 0;
-        TTable[zKey & 0x3FFFFF] = new Transposition(zKey, bestMove, bestEvaluation, depth, bestEvaluation >= beta ? 2 : bestEvaluation >= originalAlpha ? 1 : 3);
+        TTable[zKey & 0x5FFFFF] = new Transposition(zKey, bestMove, bestEvaluation, depth, bestEvaluation >= beta ? 2 : bestEvaluation >= originalAlpha ? 1 : 3);
 
         return bestEvaluation;
     }
