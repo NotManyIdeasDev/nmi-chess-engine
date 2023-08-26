@@ -83,7 +83,7 @@ public class MyBot : IChessBot
             return 0;
 
         Transposition tp = TTable[zKey & 0x5FFFFF];
-        if (notRoot && tp.ZobristKey == zKey && tp.Depth >= depth &&
+        if (notRoot && Math.Abs(tp.Evaluation) < 50000 && tp.ZobristKey == zKey && tp.Depth >= depth &&
             (tp.Flag == 1 ||
             (tp.Flag == 2 && tp.Evaluation <= alpha) ||
             (tp.Flag == 3 && tp.Evaluation >= beta))
