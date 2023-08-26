@@ -4,3 +4,5 @@ This has definitely been one of the most entertaining and fun projects I've work
 
 I'll be adding improvements and bugfixing from time to time, in the meantime feel free to explore the code.
 [API Documentation & Challenge info](https://github.com/SebLague/Chess-Challenge)
+
+Challenge the bot on [lichess](https://lichess.org/@/nmi_bot)
