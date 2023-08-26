@@ -68,7 +68,7 @@ public class MyBot : IChessBot
 
         return (middlegame * gamePhase + endgame * (24 - gamePhase)) / 24 * (board.IsWhiteToMove ? 1 : -1);
     }
-    bool Timeout() => timer.MillisecondsElapsedThisTurn >= timer.MillisecondsRemaining / 30 + timer.IncrementMilliseconds / 2.5;
+    bool Timeout() => timer.MillisecondsElapsedThisTurn >= timer.MillisecondsRemaining / 25 + timer.IncrementMilliseconds / 2;
 
     int Search(int depth, int alpha, int beta, int ply)
     {
